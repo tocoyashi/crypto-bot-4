@@ -1,6 +1,7 @@
 ccxt
 pandas
-ta
 requests
+yfinance
 statsmodels
+ta
 matplotlib
