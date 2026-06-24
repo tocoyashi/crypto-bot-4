@@ -9,12 +9,10 @@ import requests
 import time
 import random
 import io
-import base64
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
-from datetime import datetime
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHANNEL_ID = os.environ.get("CHANNEL_ID")
@@ -136,7 +134,6 @@ def generate_chart(df, symbol, direction, entry, tp1, tp4, sl):
     
     plt.tight_layout()
     
-    # ✅ حفظ كـ BytesIO بدلاً من base64
     buf = io.BytesIO()
     plt.savefig(buf, format='png', dpi=100, facecolor='white', edgecolor='none')
     buf.seek(0)
@@ -239,7 +236,7 @@ def generate_summary(direction, strategy, df, tp1, tp4, sl):
     summary = f"{structure_txt} {action_txt} {rsi_txt} {levels_txt}"
     return summary
 
-def send_crypto_signal(coin_name, direction, strategy, entry, leverage, tp1, tp2, tp3, tp4, sl, summary_text, chart_buf=None):
+def send_crypto_signal(coin_name, direction, strategy, entry, leverage, tp1, tp2, tp3, tp4, sl, summary_text, chart_buf=None, strength_score=0):
     signal_id = get_next_signal_id()
     direction_text = "LONG" if direction.lower() == "long" else "SHORT"
     clean_name = coin_name.replace("/", "")
@@ -247,25 +244,24 @@ def send_crypto_signal(coin_name, direction, strategy, entry, leverage, tp1, tp2
     zone_low = round(entry * 0.9985, get_decimals(entry))
     zone_high = round(entry * 1.0015, get_decimals(entry))
 
-    text = f"📌 SIGNAL ID: #{signal_id}\nCOIN: #{clean_name}\nLeverage: {leverage}\nDirection: {direction_text} | Type: {strategy}\n➖➖➖➖➖➖➖\nENTRY: {zone_low} - {zone_high}\nTARGETS: {tp1} - {tp2} - {tp3} - {tp4}\nSTOP LOSS: {sl}\n\n📊 {summary_text}\n➖➖➖➖➖➖➖\nCrypto Bullets: By Banana Bot®"
+    # ✅ إضافة درجة القوة للرسالة
+    text = f"📌 SIGNAL ID: #{signal_id}\nCOIN: #{clean_name}\nLeverage: {leverage}\nDirection: {direction_text} | Type: {strategy}\n⭐ Signal Strength: {strength_score:.1f}/100\n➖➖➖➖➖➖➖\nENTRY: {zone_low} - {zone_high}\nTARGETS: {tp1} - {tp2} - {tp3} - {tp4}\nSTOP LOSS: {sl}\n\n📊 {summary_text}\n➖➖➖➖➖➖➖\nCrypto Bullets: By Banana Bot®"
 
-    # إرسال النص
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {"chat_id": CHANNEL_ID, "text": text, "disable_web_page_preview": True}
     try:
         response = requests.post(url, json=payload)
         if response.json().get('ok'): 
-            print(f"Signal {signal_id} sent for {coin_name} via {strategy}")
+            print(f"Signal {signal_id} sent for {coin_name} via {strategy} (Strength: {strength_score:.1f})")
         else: 
             print(f"ERROR for {coin_name}: {response.json().get('description')}")
     except Exception as e: 
         print(f"Network error: {e}")
         return
 
-    # ✅ إرسال الشارت كملف (binary)
     if chart_buf:
         try:
-            chart_buf.seek(0)  # العودة لبداية الملف
+            chart_buf.seek(0)
             photo_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
             files = {
                 'photo': ('chart.png', chart_buf, 'image/png')
@@ -284,7 +280,10 @@ def send_crypto_signal(coin_name, direction, strategy, entry, leverage, tp1, tp2
 
 def analyze_and_trade():
     print(f"Starting SWING Scan ({TIMEFRAME}) - Pullback / Volume / Swing...")
+    print("Collecting all signals first, then filtering TOP 3...")
     exchange = ccxt.mexc()
+    
+    all_signals = []  # ✅ قائمة لتجميع جميع الإشارات
     
     for symbol in SYMBOLS:
         try:
@@ -301,6 +300,18 @@ def analyze_and_trade():
             df['rsi'] = ta.momentum.rsi(df['close'], window=14)
             df['vol_sma'] = df['volume'].rolling(window=20).mean()
 
+            entry = round(current_close, decimals)
+            lev = "10x"
+            
+            long_tps = (round(entry * 1.012, decimals), round(entry * 1.03, decimals), round(entry * 1.06, decimals), round(entry * 1.12, decimals))
+            long_sl = round(entry * 0.92, decimals)
+            
+            short_tps = (round(entry * 0.988, decimals), round(entry * 0.97, decimals), round(entry * 0.94, decimals), round(entry * 0.88, decimals))
+            short_sl = round(entry * 1.08, decimals)
+
+            # ✅ التحقق من كل استراتيجية وحساب القوة
+            
+            # 1. Pullback
             pullback_buy = (df['ema_50'].iloc[-1] > df['ema_200'].iloc[-1]) and \
                            (df['low'].iloc[-1] <= df['ema_21'].iloc[-1]) and \
                            (current_close > df['ema_21'].iloc[-1]) and \
@@ -311,58 +322,138 @@ def analyze_and_trade():
                             (current_close < df['ema_21'].iloc[-1]) and \
                             (df['rsi'].iloc[-1] > 40)
 
+            if pullback_buy:
+                # حساب قوة الارتداد
+                ema21_dist = abs(current_close - df['ema_21'].iloc[-1]) / df['ema_21'].iloc[-1] * 100
+                rsi_bonus = (60 - df['rsi'].iloc[-1]) * 0.5
+                strength = min(100, ema21_dist * 10 + rsi_bonus + 30)  # +30 base score
+                all_signals.append({
+                    'symbol': symbol,
+                    'direction': "LONG",
+                    'strategy': "Swing Pullback",
+                    'entry': entry,
+                    'leverage': lev,
+                    'tps': long_tps,
+                    'sl': long_sl,
+                    'df': df,
+                    'strength': strength
+                })
+            elif pullback_sell:
+                ema21_dist = abs(current_close - df['ema_21'].iloc[-1]) / df['ema_21'].iloc[-1] * 100
+                rsi_bonus = (df['rsi'].iloc[-1] - 40) * 0.5
+                strength = min(100, ema21_dist * 10 + rsi_bonus + 30)
+                all_signals.append({
+                    'symbol': symbol,
+                    'direction': "SHORT",
+                    'strategy': "Swing Pullback",
+                    'entry': entry,
+                    'leverage': lev,
+                    'tps': short_tps,
+                    'sl': short_sl,
+                    'df': df,
+                    'strength': strength
+                })
+
+            # 2. Volume
             vol_buy = (df['volume'].iloc[-1] > df['vol_sma'].iloc[-1] * 2.5) and (current_close > current_open)
             vol_sell = (df['volume'].iloc[-1] > df['vol_sma'].iloc[-1] * 2.5) and (current_close < current_open)
 
+            if vol_buy:
+                vol_ratio = df['volume'].iloc[-1] / df['vol_sma'].iloc[-1]
+                strength = min(100, vol_ratio * 15 + 25)  # كل مضاعفة = 15 نقطة
+                all_signals.append({
+                    'symbol': symbol,
+                    'direction': "LONG",
+                    'strategy': "Swing Volume",
+                    'entry': entry,
+                    'leverage': lev,
+                    'tps': long_tps,
+                    'sl': long_sl,
+                    'df': df,
+                    'strength': strength
+                })
+            elif vol_sell:
+                vol_ratio = df['volume'].iloc[-1] / df['vol_sma'].iloc[-1]
+                strength = min(100, vol_ratio * 15 + 25)
+                all_signals.append({
+                    'symbol': symbol,
+                    'direction': "SHORT",
+                    'strategy': "Swing Volume",
+                    'entry': entry,
+                    'leverage': lev,
+                    'tps': short_tps,
+                    'sl': short_sl,
+                    'df': df,
+                    'strength': strength
+                })
+
+            # 3. Swing Trend
             swing_buy = (df['ema_50'].iloc[-2] <= df['ema_200'].iloc[-2]) and (df['ema_50'].iloc[-1] > df['ema_200'].iloc[-1])
             swing_sell = (df['ema_50'].iloc[-2] >= df['ema_200'].iloc[-2]) and (df['ema_50'].iloc[-1] < df['ema_200'].iloc[-1])
 
-            entry = round(current_close, decimals)
-            lev = "10x"
-            
-            long_tps = (round(entry * 1.012, decimals), round(entry * 1.03, decimals), round(entry * 1.06, decimals), round(entry * 1.12, decimals))
-            long_sl = round(entry * 0.92, decimals)
-            
-            short_tps = (round(entry * 0.988, decimals), round(entry * 0.97, decimals), round(entry * 0.94, decimals), round(entry * 0.88, decimals))
-            short_sl = round(entry * 1.08, decimals)
-
-            chart = None
-
-            if pullback_buy:
-                chart = generate_chart(df, symbol, "LONG", entry, long_tps[0], long_tps[3], long_sl)
-                summary = generate_summary("LONG", "Swing Pullback", df, long_tps[0], long_tps[3], long_sl)
-                send_crypto_signal(symbol, "LONG", "Swing Pullback", entry, lev, *long_tps, long_sl, summary, chart)
-                time.sleep(6)
-            elif pullback_sell:
-                chart = generate_chart(df, symbol, "SHORT", entry, short_tps[0], short_tps[3], short_sl)
-                summary = generate_summary("SHORT", "Swing Pullback", df, short_tps[0], short_tps[3], short_sl)
-                send_crypto_signal(symbol, "SHORT", "Swing Pullback", entry, lev, *short_tps, short_sl, summary, chart)
-                time.sleep(6)
-
-            elif vol_buy:
-                chart = generate_chart(df, symbol, "LONG", entry, long_tps[0], long_tps[3], long_sl)
-                summary = generate_summary("LONG", "Swing Volume", df, long_tps[0], long_tps[3], long_sl)
-                send_crypto_signal(symbol, "LONG", "Swing Volume", entry, lev, *long_tps, long_sl, summary, chart)
-                time.sleep(6)
-            elif vol_sell:
-                chart = generate_chart(df, symbol, "SHORT", entry, short_tps[0], short_tps[3], short_sl)
-                summary = generate_summary("SHORT", "Swing Volume", df, short_tps[0], short_tps[3], short_sl)
-                send_crypto_signal(symbol, "SHORT", "Swing Volume", entry, lev, *short_tps, short_sl, summary, chart)
-                time.sleep(6)
-
-            elif swing_buy:
-                chart = generate_chart(df, symbol, "LONG", entry, long_tps[0], long_tps[3], long_sl)
-                summary = generate_summary("LONG", "Swing Trend", df, long_tps[0], long_tps[3], long_sl)
-                send_crypto_signal(symbol, "LONG", "Swing Trend", entry, lev, *long_tps, long_sl, summary, chart)
-                time.sleep(6)
+            if swing_buy:
+                ema_gap = abs(df['ema_50'].iloc[-1] - df['ema_200'].iloc[-1]) / df['ema_200'].iloc[-1] * 100
+                strength = min(100, ema_gap * 20 + 40)  # تقاطع قوي = درجة عالية
+                all_signals.append({
+                    'symbol': symbol,
+                    'direction': "LONG",
+                    'strategy': "Swing Trend",
+                    'entry': entry,
+                    'leverage': lev,
+                    'tps': long_tps,
+                    'sl': long_sl,
+                    'df': df,
+                    'strength': strength
+                })
             elif swing_sell:
-                chart = generate_chart(df, symbol, "SHORT", entry, short_tps[0], short_tps[3], short_sl)
-                summary = generate_summary("SHORT", "Swing Trend", df, short_tps[0], short_tps[3], short_sl)
-                send_crypto_signal(symbol, "SHORT", "Swing Trend", entry, lev, *short_tps, short_sl, summary, chart)
-                time.sleep(6)
+                ema_gap = abs(df['ema_50'].iloc[-1] - df['ema_200'].iloc[-1]) / df['ema_200'].iloc[-1] * 100
+                strength = min(100, ema_gap * 20 + 40)
+                all_signals.append({
+                    'symbol': symbol,
+                    'direction': "SHORT",
+                    'strategy': "Swing Trend",
+                    'entry': entry,
+                    'leverage': lev,
+                    'tps': short_tps,
+                    'sl': short_sl,
+                    'df': df,
+                    'strength': strength
+                })
                 
         except Exception as e:
             print(f"Error {symbol}: {e}")
+
+    # ✅ ترتيب الإشارات حسب القوة واختيار أفضل 3
+    print(f"\n📊 Total signals collected: {len(all_signals)}")
+    
+    if len(all_signals) == 0:
+        print("No signals found this round.")
+        return
+    
+    all_signals.sort(key=lambda x: x['strength'], reverse=True)
+    top_signals = all_signals[:3]
+    
+    print(f"🎯 Sending TOP {len(top_signals)} signals:")
+    for i, sig in enumerate(top_signals, 1):
+        print(f"  {i}. {sig['symbol']} {sig['direction']} | {sig['strategy']} | Strength: {sig['strength']:.1f}")
+
+    # ✅ إرسال أفضل 3 إشارات فقط
+    for sig in top_signals:
+        chart = generate_chart(sig['df'], sig['symbol'], sig['direction'], sig['entry'], sig['tps'][0], sig['tps'][3], sig['sl'])
+        summary = generate_summary(sig['direction'], sig['strategy'], sig['df'], sig['tps'][0], sig['tps'][3], sig['sl'])
+        send_crypto_signal(
+            sig['symbol'], 
+            sig['direction'], 
+            sig['strategy'], 
+            sig['entry'], 
+            sig['leverage'], 
+            *sig['tps'], 
+            sig['sl'], 
+            summary, 
+            chart,
+            sig['strength']
+        )
+        time.sleep(6)
 
 if __name__ == "__main__":
     print("Custom Swing Bot started...")
