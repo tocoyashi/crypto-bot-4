@@ -1,0 +1,32 @@
+name: 3-Month Backtest
+
+on:
+  workflow_dispatch:  # تشغيل يدوي فقط
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30  # حد أقصى 30 دقيقة
+    
+    steps:
+      - name: Get code
+        uses: actions/checkout@v3
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Install libraries
+        run: pip install ccxt pandas ta matplotlib
+      
+      - name: Run Backtest
+        run: python backtest.py
+      
+      - name: Upload Results
+        uses: actions/upload-artifact@v3
+        with:
+          name: backtest-results
+          path: |
+            backtest_results.txt
+            backtest_equity_curve.png
