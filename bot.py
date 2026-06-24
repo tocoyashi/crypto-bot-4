@@ -23,7 +23,6 @@ GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 
 TIMEFRAME = "4h"
 
-# ✅ 25 عملة قوية (تم حذف TON, DOT, SHIB, ETC, HBAR)
 SYMBOLS = [
     "BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT",
     "ADA/USDT", "DOGE/USDT", "TRX/USDT", "AVAX/USDT", "LINK/USDT",
@@ -40,13 +39,11 @@ def get_decimals(price):
     else: return 8
 
 def get_next_signal_id():
-    """جلب وتعديل رقم الإشارة من GitHub Gist"""
     if not GIST_ID or not GITHUB_TOKEN:
         print("Warning: GIST_ID or GITHUB_TOKEN not set, using local counter")
         return get_local_signal_id()
     
     try:
-        # قراءة الرقم الحالي من Gist
         url = f"https://api.github.com/gists/{GIST_ID}"
         headers = {"Authorization": f"token {GITHUB_TOKEN}"}
         response = requests.get(url, headers=headers)
@@ -63,7 +60,6 @@ def get_next_signal_id():
     
     next_id = current_id + 1
     
-    # تحديث الرقم في Gist
     try:
         url = f"https://api.github.com/gists/{GIST_ID}"
         headers = {"Authorization": f"token {GITHUB_TOKEN}"}
@@ -81,7 +77,6 @@ def get_next_signal_id():
     return f"{next_id:03d}"
 
 def get_local_signal_id():
-    """نسخة احتياطية محلية"""
     filename = "signal_counter.txt"
     try:
         with open(filename, "r") as file:
@@ -100,25 +95,17 @@ def get_local_signal_id():
     return f"{next_id:03d}"
 
 def generate_chart(df, symbol, direction, entry, tp1, tp4, sl):
-    """إنشاء شارت تحليلي بلون أبيض"""
     fig, ax = plt.subplots(figsize=(10, 6))
     fig.patch.set_facecolor('white')
     ax.set_facecolor('white')
     
-    # تحويل التواريخ
     df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
     
-    # رسم السعر
     ax.plot(df['timestamp'], df['close'], color='#2c3e50', linewidth=1.5, label='Price')
     ax.plot(df['timestamp'], df['ema_21'], color='#3498db', linewidth=1, label='EMA 21', alpha=0.8)
     ax.plot(df['timestamp'], df['ema_50'], color='#f39c12', linewidth=1, label='EMA 50', alpha=0.8)
     ax.plot(df['timestamp'], df['ema_200'], color='#e74c3c', linewidth=1, label='EMA 200', alpha=0.8)
     
-    # آخر سعر
-    last_price = df['close'].iloc[-1]
-    last_time = df['timestamp'].iloc[-1]
-    
-    # خطوط الأهداف والوقف
     if direction == "LONG":
         ax.axhline(y=tp1, color='#27ae60', linestyle='--', linewidth=1, alpha=0.7, label=f'TP1: {tp1}')
         ax.axhline(y=tp4, color='#27ae60', linestyle='--', linewidth=1.5, alpha=0.9, label=f'TP4: {tp4}')
@@ -130,39 +117,32 @@ def generate_chart(df, symbol, direction, entry, tp1, tp4, sl):
         ax.axhline(y=sl, color='#e74c3c', linestyle='--', linewidth=1.5, alpha=0.9, label=f'SL: {sl}')
         ax.axhline(y=entry, color='#9b59b6', linestyle='-', linewidth=1, alpha=0.7, label=f'Entry: {entry}')
     
-    # تنسيق الشارت
     ax.set_title(f'{symbol} - {direction} Signal | 4H Chart', fontsize=14, fontweight='bold', color='#2c3e50')
     ax.set_xlabel('Date', fontsize=10, color='#2c3e50')
     ax.set_ylabel('Price (USDT)', fontsize=10, color='#2c3e50')
     
-    # تنسيق المحاور
     ax.tick_params(colors='#2c3e50')
     ax.spines['bottom'].set_color('#bdc3c7')
     ax.spines['top'].set_color('#bdc3c7')
     ax.spines['left'].set_color('#bdc3c7')
     ax.spines['right'].set_color('#bdc3c7')
     
-    # تنسيق التواريخ
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
     ax.xaxis.set_major_locator(mdates.DayLocator(interval=2))
     plt.xticks(rotation=45)
     
-    # إضافة شبكة خفيفة
     ax.grid(True, alpha=0.2, color='#95a5a6', linestyle='-')
-    
-    # إضافة legend
     ax.legend(loc='upper left', fontsize=8, facecolor='white', edgecolor='#bdc3c7')
     
     plt.tight_layout()
     
-    # حفظ كصورة base64
+    # ✅ حفظ كـ BytesIO بدلاً من base64
     buf = io.BytesIO()
     plt.savefig(buf, format='png', dpi=100, facecolor='white', edgecolor='none')
     buf.seek(0)
-    img_base64 = base64.b64encode(buf.read()).decode('utf-8')
     plt.close(fig)
     
-    return img_base64
+    return buf
 
 def generate_summary(direction, strategy, df, tp1, tp4, sl):
     rsi_val = round(df['rsi'].iloc[-1], 1)
@@ -259,7 +239,7 @@ def generate_summary(direction, strategy, df, tp1, tp4, sl):
     summary = f"{structure_txt} {action_txt} {rsi_txt} {levels_txt}"
     return summary
 
-def send_crypto_signal(coin_name, direction, strategy, entry, leverage, tp1, tp2, tp3, tp4, sl, summary_text, chart_base64=None):
+def send_crypto_signal(coin_name, direction, strategy, entry, leverage, tp1, tp2, tp3, tp4, sl, summary_text, chart_buf=None):
     signal_id = get_next_signal_id()
     direction_text = "LONG" if direction.lower() == "long" else "SHORT"
     clean_name = coin_name.replace("/", "")
@@ -269,7 +249,7 @@ def send_crypto_signal(coin_name, direction, strategy, entry, leverage, tp1, tp2
 
     text = f"📌 SIGNAL ID: #{signal_id}\nCOIN: #{clean_name}\nLeverage: {leverage}\nDirection: {direction_text} | Type: {strategy}\n➖➖➖➖➖➖➖\nENTRY: {zone_low} - {zone_high}\nTARGETS: {tp1} - {tp2} - {tp3} - {tp4}\nSTOP LOSS: {sl}\n\n📊 {summary_text}\n➖➖➖➖➖➖➖\nCrypto Bullets: By Banana Bot®"
 
-    # إرسال النص أولاً
+    # إرسال النص
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {"chat_id": CHANNEL_ID, "text": text, "disable_web_page_preview": True}
     try:
@@ -282,16 +262,19 @@ def send_crypto_signal(coin_name, direction, strategy, entry, leverage, tp1, tp2
         print(f"Network error: {e}")
         return
 
-    # ✅ إرسال الشارت إذا كان متوفراً
-    if chart_base64:
+    # ✅ إرسال الشارت كملف (binary)
+    if chart_buf:
         try:
+            chart_buf.seek(0)  # العودة لبداية الملف
             photo_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
-            photo_data = {
+            files = {
+                'photo': ('chart.png', chart_buf, 'image/png')
+            }
+            data = {
                 "chat_id": CHANNEL_ID,
-                "photo": f"data:image/png;base64,{chart_base64}",
                 "caption": f"📈 {clean_name} 4H Chart Analysis"
             }
-            photo_response = requests.post(photo_url, json=photo_data)
+            photo_response = requests.post(photo_url, data=data, files=files)
             if photo_response.json().get('ok'):
                 print(f"Chart sent for {coin_name}")
             else:
@@ -337,7 +320,6 @@ def analyze_and_trade():
             entry = round(current_close, decimals)
             lev = "10x"
             
-            # ✅ المستويات المعدلة
             long_tps = (round(entry * 1.012, decimals), round(entry * 1.03, decimals), round(entry * 1.06, decimals), round(entry * 1.12, decimals))
             long_sl = round(entry * 0.92, decimals)
             
