@@ -1,34 +1,26 @@
-name: Swing Trading Bot
+name: Crypto Pairs Bot
 
 on:
   schedule:
-    # Runs every 4 hours: 00:00, 04:00, 08:00, 12:00, 16:00, 20:00 (UTC Time)
-    - cron: '0 0,4,8,12,16,20 * * *'
-  
-  # Allows you to run the bot manually from GitHub Actions tab
+    - cron: '0 */4 * * *'   # كل 4 ساعات
   workflow_dispatch:
 
 jobs:
-  build:
+  run-bot:
     runs-on: ubuntu-latest
-
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
-
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.10'
-
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-
-    - name: Run Swing Bot
-      env:
-        BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-        CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
-      run: |
-        python bot.py
+      - name: Get code
+        uses: actions/checkout@v3
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install libraries
+        run: pip install -r requirements.txt
+      - name: Run Bot
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
+          GIST_ID: ${{ secrets.GIST_ID }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python bot.py
