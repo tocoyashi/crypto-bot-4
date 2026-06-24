@@ -6,14 +6,14 @@ on:
 jobs:
   backtest:
     runs-on: ubuntu-latest
-    timeout-minutes: 30  # حد أقصى 30 دقيقة
+    timeout-minutes: 30
     
     steps:
       - name: Get code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4  # ✅ تحديث إلى v4
       
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5  # ✅ تحديث إلى v5
         with:
           python-version: '3.10'
       
@@ -24,9 +24,10 @@ jobs:
         run: python backtest.py
       
       - name: Upload Results
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4  # ✅ تحديث إلى v4 (الإصلاح!)
         with:
           name: backtest-results
           path: |
             backtest_results.txt
             backtest_equity_curve.png
+          retention-days: 30  # حفظ النتائج لمدة 30 يوماً
