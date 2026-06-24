@@ -2,4 +2,5 @@ ccxt
 pandas
 ta
 requests
+statsmodels
 matplotlib
